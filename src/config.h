@@ -33,6 +33,7 @@
 #define CRAFT_KEY_RIGHT 'D'
 #define CRAFT_KEY_JUMP GLFW_KEY_SPACE
 #define CRAFT_KEY_FLY GLFW_KEY_TAB
+#define CRAFT_KEY_MOON 'M'
 #define CRAFT_KEY_OBSERVE 'O'
 #define CRAFT_KEY_OBSERVE_INSET 'P'
 #define CRAFT_KEY_ITEM_NEXT 'E'
@@ -50,5 +51,16 @@
 #define DELETE_CHUNK_RADIUS 14
 #define CHUNK_SIZE 32
 #define COMMIT_INTERVAL 5
+
+// HUD / feel tweaks
+// Base HUD font pixel size before DPI scaling.
+#define HUD_FONT_PX 12
+// User-requested bump ("+5px") applied on top of HUD_FONT_PX.
+#define HUD_FONT_PX_BUMP 5
+
+// Gravity tuning
+// Earth is the original feel; Moon is ~1/6 g.
+#define GRAVITY_EARTH 1.0f
+#define GRAVITY_MOON 0.165f
 
 #endif

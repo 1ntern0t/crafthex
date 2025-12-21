@@ -135,6 +135,7 @@ typedef struct {
     int observe1;
     int observe2;
     int flying;
+    float gravity_scale;
     int item_index;
     int scale;
     int ortho;
@@ -2250,6 +2251,12 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
         if (key == CRAFT_KEY_FLY) {
             g->flying = !g->flying;
         }
+        if (key == CRAFT_KEY_MOON) {
+            // Toggle low-gravity "Moon" feel (only affects non-flying movement).
+            g->gravity_scale = (g->gravity_scale == GRAVITY_MOON)
+                ? GRAVITY_EARTH
+                : GRAVITY_MOON;
+        }
         if (key >= '1' && key <= '9') {
             g->item_index = key - '1';
         }
@@ -2372,7 +2379,7 @@ void create_window() {
         window_height = modes[mode_count - 1].height;
     }
     g->window = glfwCreateWindow(
-        window_width, window_height, "Craft", monitor, NULL);
+        window_width, window_height, "CraftHex", monitor, NULL);
 }
 
 void handle_mouse_input() {
@@ -2453,8 +2460,11 @@ void handle_movement(double dt) {
             dy = 0;
         }
         else {
-            dy -= ut * 25;
-            dy = MAX(dy, -250);
+            // Gravity feel: Earth by default; toggle Moon mode for floatier motion.
+            float g_accel = 25.0f * g->gravity_scale;
+            float terminal = -250.0f * g->gravity_scale;
+            dy -= ut * g_accel;
+            dy = MAX(dy, terminal);
         }
         s->x += vx;
         s->y += vy + dy * ut;
@@ -2573,6 +2583,7 @@ void reset_model() {
     g->observe1 = 0;
     g->observe2 = 0;
     g->flying = 0;
+    g->gravity_scale = GRAVITY_EARTH;
     g->item_index = 0;
     memset(g->typing_buffer, 0, sizeof(char) * MAX_TEXT_LENGTH);
     g->typing = 0;
@@ -2853,7 +2864,7 @@ int main(int argc, char **argv) {
 
             // RENDER TEXT //
             char text_buffer[1024];
-            float ts = 12 * g->scale;
+            float ts = (HUD_FONT_PX + HUD_FONT_PX_BUMP) * g->scale;
             float tx = ts / 2;
             float ty = g->height - ts;
             if (SHOW_INFO_TEXT) {
@@ -2861,12 +2872,15 @@ int main(int argc, char **argv) {
                 char am_pm = hour < 12 ? 'a' : 'p';
                 hour = hour % 12;
                 hour = hour ? hour : 12;
+                const char *g_label =
+                    (g->gravity_scale == GRAVITY_MOON) ? "MOON" : "EARTH";
+                const char *fly_label = g->flying ? "FLY" : "WALK";
                 snprintf(
                     text_buffer, 1024,
-                    "(%d, %d) (%.2f, %.2f, %.2f) [%d, %d, %d] %d%cm %dfps",
+                    "(%d, %d) (%.2f, %.2f, %.2f) [%dP, %dC, %dF] %d%cm %dfps  %s %s",
                     chunked(s->x), chunked(s->z), s->x, s->y, s->z,
                     g->player_count, g->chunk_count,
-                    face_count * 2, hour, am_pm, fps.fps);
+                    face_count * 2, hour, am_pm, fps.fps, g_label, fly_label);
                 render_text(&text_attrib, ALIGN_LEFT, tx, ty, ts, text_buffer);
                 ty -= ts * 2;
             }

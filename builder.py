@@ -146,7 +146,7 @@ class Client(object):
         self.authenticate()
     def authenticate(self):
         username, identity_token = get_identity()
-        url = 'https://craft.michaelfogleman.com/api/1/identity'
+        url = 'https://YOURWEBSITE.com/api/1/identity'
         payload = {
             'username': username,
             'identity_token': identity_token,

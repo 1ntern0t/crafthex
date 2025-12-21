@@ -23,7 +23,7 @@ BUFFER_SIZE = 4096
 COMMIT_INTERVAL = 5
 
 AUTH_REQUIRED = True
-AUTH_URL = 'https://craft.michaelfogleman.com/api/1/access'
+AUTH_URL = 'https://YOURWEBSITE/api/1/access'
 
 DAY_LENGTH = 600
 SPAWN_POINT = (0, 0, 0, 0, 0)

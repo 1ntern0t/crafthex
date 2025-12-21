@@ -2,9 +2,106 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <string.h>
+#include <limits.h>
+#include <unistd.h>
 #include "lodepng.h"
 #include "matrix.h"
 #include "util.h"
+
+// Asset path resolver
+//
+// Crafthex was originally run from the repository root where relative paths like
+// "textures/texture.png" and "shaders/*.glsl" exist. If you run the binary from
+// a different working directory (e.g., build/), those relative paths break.
+//
+// We resolve asset paths by trying (in order):
+//   1) the provided path as-is
+//   2) $CRAFTHEX_ASSET_DIR/<path>
+//   3) <exe_dir>/<path>
+//   4) <exe_dir>/../<path>
+//   5) <exe_dir>/../../<path>
+
+static int file_exists(const char *path) {
+    return path && access(path, R_OK) == 0;
+}
+
+static void path_join(char *out, size_t out_size, const char *a, const char *b) {
+    if (!out || out_size == 0) {
+        return;
+    }
+    if (!a) a = "";
+    if (!b) b = "";
+    // Ensure exactly one '/'
+    size_t alen = strlen(a);
+    int need_slash = (alen > 0 && a[alen - 1] != '/');
+    if (need_slash) {
+        snprintf(out, out_size, "%s/%s", a, b);
+    }
+    else {
+        snprintf(out, out_size, "%s%s", a, b);
+    }
+}
+
+static int get_exe_dir(char *out, size_t out_size) {
+    if (!out || out_size == 0) {
+        return 0;
+    }
+    char exe_path[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (n <= 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    exe_path[n] = '\0';
+    // Strip filename
+    char *slash = strrchr(exe_path, '/');
+    if (!slash) {
+        out[0] = '\0';
+        return 0;
+    }
+    *slash = '\0';
+    snprintf(out, out_size, "%s", exe_path);
+    return 1;
+}
+
+static int resolve_asset_path(const char *in, char *out, size_t out_size) {
+    if (!in || !out || out_size == 0) {
+        return 0;
+    }
+    // 1) As-is
+    if (file_exists(in)) {
+        snprintf(out, out_size, "%s", in);
+        return 1;
+    }
+    // 2) Env var root
+    const char *asset_root = getenv("CRAFTHEX_ASSET_DIR");
+    if (asset_root && asset_root[0]) {
+        char candidate[PATH_MAX];
+        path_join(candidate, sizeof(candidate), asset_root, in);
+        if (file_exists(candidate)) {
+            snprintf(out, out_size, "%s", candidate);
+            return 1;
+        }
+    }
+    // 3-5) Based on executable directory
+    char exe_dir[PATH_MAX];
+    if (get_exe_dir(exe_dir, sizeof(exe_dir))) {
+        const char *prefixes[] = { "", "/..", "/../.." };
+        for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+            char base[PATH_MAX];
+            snprintf(base, sizeof(base), "%s%s", exe_dir, prefixes[i]);
+            char candidate[PATH_MAX];
+            path_join(candidate, sizeof(candidate), base, in);
+            if (file_exists(candidate)) {
+                snprintf(out, out_size, "%s", candidate);
+                return 1;
+            }
+        }
+    }
+    out[0] = '\0';
+    return 0;
+}
 
 int rand_int(int n) {
     int result;
@@ -28,9 +125,25 @@ void update_fps(FPS *fps) {
 }
 
 char *load_file(const char *path) {
-    FILE *file = fopen(path, "rb");
+    char resolved[PATH_MAX];
+    const char *use_path = path;
+    if (resolve_asset_path(path, resolved, sizeof(resolved))) {
+        use_path = resolved;
+    }
+    FILE *file = fopen(use_path, "rb");
     if (!file) {
-        fprintf(stderr, "fopen %s failed: %d %s\n", path, errno, strerror(errno));
+        char edir[PATH_MAX] = {0};
+        get_exe_dir(edir, sizeof(edir));
+        fprintf(stderr,
+            "fopen failed for '%s' (resolved='%s'): %d %s\n"
+            "Hint: run from the repo root, or set CRAFTHEX_ASSET_DIR to the project directory.\n"
+            "exe_dir: %s\n",
+            path,
+            resolved[0] ? resolved : "(unresolved)",
+            errno,
+            strerror(errno),
+            edir[0] ? edir : "(unknown)"
+        );
         exit(1);
     }
     fseek(file, 0, SEEK_END);
@@ -135,12 +248,34 @@ void flip_image_vertical(
 
 void load_png_texture(const char *file_name) {
     unsigned int error;
-    unsigned char *data;
-    unsigned int width, height;
-    error = lodepng_decode32_file(&data, &width, &height, file_name);
+    unsigned char *data = NULL;
+    unsigned int width = 0, height = 0;
+
+    char resolved[PATH_MAX];
+    const char *use_path = file_name;
+    if (resolve_asset_path(file_name, resolved, sizeof(resolved))) {
+        use_path = resolved;
+    }
+    error = lodepng_decode32_file(&data, &width, &height, use_path);
     if (error) {
-        fprintf(stderr, "load_png_texture %s failed, error %u: %s\n", file_name, error, lodepng_error_text(error));
-        exit(1);
+        // Don't hard-exit on textures. Use a visible fallback so the app can
+        // still run even if assets aren't found (common when running from build/).
+        fprintf(stderr,
+            "load_png_texture failed for '%s' (resolved='%s'), error %u: %s\n"
+            "Hint: run from the repo root, or set CRAFTHEX_ASSET_DIR to the project directory.\n",
+            file_name,
+            resolved[0] ? resolved : "(unresolved)",
+            error,
+            lodepng_error_text(error));
+
+        // 2x2 magenta/black checker (RGBA)
+        unsigned char fallback[16] = {
+            255, 0, 255, 255,   0, 0, 0, 255,
+            0, 0, 0, 255,       255, 0, 255, 255
+        };
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, fallback);
+        return;
     }
     flip_image_vertical(data, width, height);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,

@@ -21,7 +21,7 @@ size_t write_function(char *data, size_t size, size_t count, void *arg) {
 int get_access_token(
     char *result, int length, char *username, char *identity_token)
 {
-    static char url[] = "https://craft.michaelfogleman.com/api/1/identity";
+    static char url[] = "BLANK-FOR-NOW";
     strncpy(result, "", length);
     CURL *curl = curl_easy_init();
     if (curl) {

@@ -294,6 +294,21 @@ GLuint gen_text_buffer(float x, float y, float n, char *text) {
     return gen_faces(4, length, data);
 }
 
+// 2D quad buffer for HUD panels (position.xy, uv.xy)
+static GLuint gen_quad_buffer_2d(float x, float y, float w, float h) {
+    // Two triangles
+    GLfloat data[24] = {
+        x,     y,     0, 0,
+        x + w, y,     1, 0,
+        x + w, y + h, 1, 1,
+
+        x,     y,     0, 0,
+        x + w, y + h, 1, 1,
+        x,     y + h, 0, 1
+    };
+    return gen_buffer(sizeof(data), data);
+}
+
 void draw_triangles_3d_ao(Attrib *attrib, GLuint buffer, int count) {
     glBindBuffer(GL_ARRAY_BUFFER, buffer);
     glEnableVertexAttribArray(attrib->position);
@@ -380,6 +395,14 @@ void draw_text(Attrib *attrib, GLuint buffer, int length) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     draw_triangles_2d(attrib, buffer, length * 6);
+    glDisable(GL_BLEND);
+}
+
+// Draw a 2D quad buffer (6 vertices) with standard alpha blending.
+static void draw_quad_2d(Attrib *attrib, GLuint buffer) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    draw_triangles_2d(attrib, buffer, 6);
     glDisable(GL_BLEND);
 }
 
@@ -1797,7 +1820,31 @@ void render_text(
     glUniform1i(attrib->extra1, 0);
     int length = strlen(text);
     x -= n * justify * (length - 1) / 2;
+
+    // HUD panel behind text: translucent black with a bit of padding.
+    // Uses a tiny RGBA texture bound to unit 4.
+    float pad = MAX(2.0f, n * 0.15f);
+    float w = n * length + pad * 2;
+    float h = n + pad * 2;
+    // Our text baseline is at (x,y) with glyph height n; shift panel slightly.
+    float bx = x - pad;
+    float by = y - pad;
+    GLuint bg = gen_quad_buffer_2d(bx, by, w, h);
+    glUniform1i(attrib->sampler, 4);
+    draw_quad_2d(attrib, bg);
+    del_buffer(bg);
+
+    // Glow pass: additive blend, same geometry.
+    // Using offsets creates a visible "double text" effect on some fonts; this
+    // approach boosts emissive intensity without ghosting.
     GLuint buffer = gen_text_buffer(x, y, n, text);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glUniform1i(attrib->sampler, 1);
+    draw_triangles_2d(attrib, buffer, length * 6);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_BLEND);
+
     draw_text(attrib, buffer, length);
     del_buffer(buffer);
 }
@@ -2379,7 +2426,7 @@ void create_window() {
         window_height = modes[mode_count - 1].height;
     }
     g->window = glfwCreateWindow(
-        window_width, window_height, "CraftHex", monitor, NULL);
+        window_width, window_height, "Craft", monitor, NULL);
 }
 
 void handle_mouse_input() {
@@ -2441,7 +2488,9 @@ void handle_movement(double dt) {
                 vy = 1;
             }
             else if (dy == 0) {
-                dy = 8;
+                // Keep jump height roughly consistent across gravity modes,
+                // but make airtime longer in Moon mode (floaty feel).
+                dy = 8.0f * sqrtf(g->gravity_scale);
             }
         }
     }
@@ -2661,6 +2710,18 @@ int main(int argc, char **argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     load_png_texture("textures/sign.png");
+
+    // HUD background panel texture (1x1 translucent black)
+    // Bound to unit 4; used by the text shader to draw info/chat backplates.
+    GLuint hud_bg;
+    glGenTextures(1, &hud_bg);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, hud_bg);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    unsigned char hud_px[4] = { 0, 0, 0, 150 };
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, hud_px);
 
     // LOAD SHADERS //
     Attrib block_attrib = {0};

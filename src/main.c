@@ -136,6 +136,7 @@ typedef struct {
     int observe2;
     int flying;
     float gravity_scale;
+    int ice_slide;
     int item_index;
     int scale;
     int ortho;
@@ -1821,30 +1822,9 @@ void render_text(
     int length = strlen(text);
     x -= n * justify * (length - 1) / 2;
 
-    // HUD panel behind text: translucent black with a bit of padding.
-    // Uses a tiny RGBA texture bound to unit 4.
-    float pad = MAX(2.0f, n * 0.15f);
-    float w = n * length + pad * 2;
-    float h = n + pad * 2;
-    // Our text baseline is at (x,y) with glyph height n; shift panel slightly.
-    float bx = x - pad;
-    float by = y - pad;
-    GLuint bg = gen_quad_buffer_2d(bx, by, w, h);
-    glUniform1i(attrib->sampler, 4);
-    draw_quad_2d(attrib, bg);
-    del_buffer(bg);
-
-    // Glow pass: additive blend, same geometry.
-    // Using offsets creates a visible "double text" effect on some fonts; this
-    // approach boosts emissive intensity without ghosting.
+    // Keep original text rendering behavior (no HUD panel / glow pass here).
+    // This avoids shader/texture-state assumptions and ensures font visibility.
     GLuint buffer = gen_text_buffer(x, y, n, text);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glUniform1i(attrib->sampler, 1);
-    draw_triangles_2d(attrib, buffer, length * 6);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_BLEND);
-
     draw_text(attrib, buffer, length);
     del_buffer(buffer);
 }
@@ -2222,6 +2202,9 @@ void on_middle_click() {
     }
 }
 
+// Forward declaration: used by input handlers.
+void add_message(const char *text);
+
 void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
     int control = mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER);
     int exclusive =
@@ -2303,6 +2286,14 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
             g->gravity_scale = (g->gravity_scale == GRAVITY_MOON)
                 ? GRAVITY_EARTH
                 : GRAVITY_MOON;
+            add_message((g->gravity_scale == GRAVITY_MOON)
+                ? "Gravity: MOON"
+                : "Gravity: EARTH");
+        }
+        if (key == CRAFT_KEY_ICE) {
+            // Toggle ground "ice slide" inertia (purely client-side feel).
+            g->ice_slide = !g->ice_slide;
+            add_message(g->ice_slide ? "Ice slide: ON" : "Ice slide: OFF");
         }
         if (key >= '1' && key <= '9') {
             g->item_index = key - '1';
@@ -2425,8 +2416,9 @@ void create_window() {
         window_width = modes[mode_count - 1].width;
         window_height = modes[mode_count - 1].height;
     }
+    // Keep project branding consistent.
     g->window = glfwCreateWindow(
-        window_width, window_height, "Craft", monitor, NULL);
+        window_width, window_height, "CraftHex", monitor, NULL);
 }
 
 void handle_mouse_input() {
@@ -2464,6 +2456,9 @@ void handle_mouse_input() {
 
 void handle_movement(double dt) {
     static float dy = 0;
+    // Horizontal inertia for "ice" slide feel.
+    static float slide_vx = 0;
+    static float slide_vz = 0;
     State *s = &g->players->state;
     int sz = 0;
     int sx = 0;
@@ -2495,15 +2490,59 @@ void handle_movement(double dt) {
         }
     }
     float speed = g->flying ? 20 : 5;
+
+    // If ice-slide is disabled, ensure we don't carry stale inertia.
+    if (!g->ice_slide) {
+        slide_vx = 0;
+        slide_vz = 0;
+    }
+
+    // Optional ice-slide: treat input as acceleration, keep inertia on ground.
+    // This is intentionally lightweight (no new fields in State/Player) and
+    // only affects ground walking.
+    if (!g->flying && g->ice_slide) {
+        // Desired horizontal velocity (blocks/sec).
+        float dvx = vx * speed;
+        float dvz = vz * speed;
+
+        // Exponential friction makes behavior frame-rate stable.
+        float f = expf(-ICE_SLIDE_FRICTION * (float)dt);
+        slide_vx *= f;
+        slide_vz *= f;
+
+        // Acceleration toward desired velocity.
+        float a = ICE_SLIDE_ACCEL * (float)dt;
+        if (a > 1.0f) a = 1.0f;
+        slide_vx += (dvx - slide_vx) * a;
+        slide_vz += (dvz - slide_vz) * a;
+
+        // Use sliding velocity for horizontal motion.
+        vx = slide_vx;
+        vz = slide_vz;
+        // vy remains as computed (jump/vertical).
+    }
+    // In non-slide mode vx/vy/vz are normalized directions; in slide mode vx/vz
+    // already contain world velocities (blocks/sec). Normalize both cases into
+    // a consistent "units/sec" estimate.
+    float evx = g->ice_slide && !g->flying ? vx : vx * speed;
+    float evy = vy * speed + ABS(dy) * 2;
+    float evz = g->ice_slide && !g->flying ? vz : vz * speed;
     int estimate = roundf(sqrtf(
-        powf(vx * speed, 2) +
-        powf(vy * speed + ABS(dy) * 2, 2) +
-        powf(vz * speed, 2)) * dt * 8);
+        powf(evx, 2) +
+        powf(evy, 2) +
+        powf(evz, 2)) * dt * 8);
     int step = MAX(8, estimate);
     float ut = dt / step;
-    vx = vx * ut * speed;
+    if (g->ice_slide && !g->flying) {
+        // vx/vz already in blocks/sec.
+        vx = vx * ut;
+        vz = vz * ut;
+    }
+    else {
+        vx = vx * ut * speed;
+        vz = vz * ut * speed;
+    }
     vy = vy * ut * speed;
-    vz = vz * ut * speed;
     for (int i = 0; i < step; i++) {
         if (g->flying) {
             dy = 0;
@@ -2633,6 +2672,7 @@ void reset_model() {
     g->observe2 = 0;
     g->flying = 0;
     g->gravity_scale = GRAVITY_EARTH;
+    g->ice_slide = ICE_SLIDE_ENABLED;
     g->item_index = 0;
     memset(g->typing_buffer, 0, sizeof(char) * MAX_TEXT_LENGTH);
     g->typing = 0;

@@ -34,6 +34,8 @@
 #define CRAFT_KEY_JUMP GLFW_KEY_SPACE
 #define CRAFT_KEY_FLY GLFW_KEY_TAB
 #define CRAFT_KEY_MOON 'M'
+// Toggle "ice slide" ground inertia
+#define CRAFT_KEY_ICE 'I'
 #define CRAFT_KEY_OBSERVE 'O'
 #define CRAFT_KEY_OBSERVE_INSET 'P'
 #define CRAFT_KEY_ITEM_NEXT 'E'
@@ -62,5 +64,15 @@
 // Earth is the original feel; Moon is ~1/6 g.
 #define GRAVITY_EARTH 1.0f
 #define GRAVITY_MOON 0.165f
+
+// Ice-slide feel (ground movement inertia)
+// 0 = classic immediate movement
+#define ICE_SLIDE_ENABLED 0
+// Larger = more responsive acceleration; smaller = drifty.
+// Tuned for a *noticeable* glide: you should keep moving after you stop input.
+#define ICE_SLIDE_ACCEL 8.0f
+// Larger = more braking friction; smaller = more slippery.
+// 0.35 -> ~70% velocity retained after 1 second (exp(-0.35)).
+#define ICE_SLIDE_FRICTION 0.35f
 
 #endif

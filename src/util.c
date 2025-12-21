@@ -277,25 +277,6 @@ void load_png_texture(const char *file_name) {
             GL_UNSIGNED_BYTE, fallback);
         return;
     }
-    // Optional runtime tinting: keep the original font alpha, but force a
-    // terminal-lime RGB for the HUD font. This avoids shader changes and keeps
-    // the "terminal green" aesthetic consistent.
-    if (strstr(file_name, "font.png")) {
-        unsigned int pixel_count = width * height;
-        for (unsigned int i = 0; i < pixel_count; i++) {
-            unsigned int o = i * 4;
-            unsigned char a = data[o + 3];
-            // Keep fully transparent pixels transparent.
-            if (!a) {
-                continue;
-            }
-            // Lime green (terminal vibe). Slightly muted so it isn't neon-sick.
-            data[o + 0] = 32;   // R
-            data[o + 1] = 255;  // G
-            data[o + 2] = 96;   // B
-        }
-    }
-
     flip_image_vertical(data, width, height);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
         GL_UNSIGNED_BYTE, data);

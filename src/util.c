@@ -4,9 +4,9 @@
 #include <errno.h>
 #include <string.h>
 #include <limits.h>
-#include <unistd.h>
 #include "lodepng.h"
 #include "matrix.h"
+#include "platform.h"
 #include "util.h"
 
 // Asset path resolver
@@ -23,7 +23,7 @@
 //   5) <exe_dir>/../../<path>
 
 static int file_exists(const char *path) {
-    return path && access(path, R_OK) == 0;
+    return platform_file_readable(path);
 }
 
 static void path_join(char *out, size_t out_size, const char *a, const char *b) {
@@ -44,25 +44,7 @@ static void path_join(char *out, size_t out_size, const char *a, const char *b) 
 }
 
 static int get_exe_dir(char *out, size_t out_size) {
-    if (!out || out_size == 0) {
-        return 0;
-    }
-    char exe_path[PATH_MAX];
-    ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (n <= 0) {
-        out[0] = '\0';
-        return 0;
-    }
-    exe_path[n] = '\0';
-    // Strip filename
-    char *slash = strrchr(exe_path, '/');
-    if (!slash) {
-        out[0] = '\0';
-        return 0;
-    }
-    *slash = '\0';
-    snprintf(out, out_size, "%s", exe_path);
-    return 1;
+    return platform_get_exe_dir(out, out_size);
 }
 
 static int resolve_asset_path(const char *in, char *out, size_t out_size) {

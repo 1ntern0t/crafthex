@@ -330,7 +330,7 @@ class Model(object):
         client.user_id = user_id
         if user_id is None:
             client.nick = 'guest%d' % client.client_id
-            client.send(TALK, 'Visit ***.com to register!')
+            client.send(TALK, 'Visit craft.michaelfogleman.com to register!')
         else:
             client.nick = username
         self.send_nick(client)
